@@ -69,73 +69,84 @@ async def async_setup_entry(
     """Set up the inverter select entities from a config entry."""
     inverter = config_entry.runtime_data.inverter
     device_info = config_entry.runtime_data.device_info
+    setting_reader = config_entry.runtime_data.setting_reader
 
     supported_modes = await inverter.get_operation_modes(True)
-    # read current operating mode from the inverter
-    try:
-        active_mode = await inverter.get_operation_mode()
-        eco_mode = await inverter.read_setting("eco_mode_1")
-        current_eco_power = abs(eco_mode.power) if eco_mode.power else 0
-        current_eco_soc = eco_mode.soc or 0
-    except (InverterError, ValueError):
-        # Inverter model does not support this setting
-        _LOGGER.debug("Could not read inverter operation mode", exc_info=True)
-    else:
-        active_mode_option = _MODE_TO_OPTION.get(active_mode)
-        if active_mode_option is not None:
-            entity = InverterOperationModeEntity(
+
+    async def _async_add_operation_mode_entity() -> None:
+        """Read current operating mode from the inverter and add its entity."""
+        try:
+            active_mode = await setting_reader.async_read(inverter.get_operation_mode)
+            eco_mode = await setting_reader.async_read(
+                inverter.read_setting, "eco_mode_1"
+            )
+            current_eco_power = abs(eco_mode.power) if eco_mode.power else 0
+            current_eco_soc = eco_mode.soc or 0
+        except (InverterError, ValueError):
+            # Inverter model does not support this setting
+            _LOGGER.debug("Could not read inverter operation mode", exc_info=True)
+        else:
+            active_mode_option = _MODE_TO_OPTION.get(active_mode)
+            if active_mode_option is not None:
+                entity = InverterOperationModeEntity(
+                    device_info,
+                    OPERATION_MODE,
+                    inverter,
+                    [v for k, v in _MODE_TO_OPTION.items() if k in supported_modes],
+                    active_mode_option,
+                    current_eco_power,
+                    current_eco_soc,
+                )
+                async_add_entities([entity])
+            else:
+                _LOGGER.warning(
+                    "Active mode %s not found in Goodwe Inverter Operation Mode Entity. Skipping entity creation",
+                    active_mode,
+                )
+
+            eco_mode_power_entity_id = er.async_get(hass).async_get_entity_id(
+                Platform.NUMBER,
+                DOMAIN,
+                f"{DOMAIN}-eco_mode_power-{inverter.serial_number}",
+            )
+            if eco_mode_power_entity_id:
+                async_track_state_change_event(
+                    hass,
+                    eco_mode_power_entity_id,
+                    entity.update_eco_mode_power,
+                )
+            eco_mode_soc_entity_id = er.async_get(hass).async_get_entity_id(
+                Platform.NUMBER,
+                DOMAIN,
+                f"{DOMAIN}-eco_mode_soc-{inverter.serial_number}",
+            )
+            if eco_mode_soc_entity_id:
+                async_track_state_change_event(
+                    hass,
+                    eco_mode_soc_entity_id,
+                    entity.update_eco_mode_soc,
+                )
+
+    async def _async_add_ems_mode_entity() -> None:
+        """Read current EMS mode from the inverter and add its entity."""
+        try:
+            ems_mode = await setting_reader.async_read(inverter.get_ems_mode)
+        except (InverterError, ValueError):
+            # Inverter model does not support EMS modes
+            _LOGGER.debug("Could not read inverter EMS mode", exc_info=True)
+        else:
+            entity = InverterEMSModeEntity(
                 device_info,
-                OPERATION_MODE,
+                EMS_MODE,
                 inverter,
-                [v for k, v in _MODE_TO_OPTION.items() if k in supported_modes],
-                active_mode_option,
-                current_eco_power,
-                current_eco_soc,
+                ems_mode,
             )
             async_add_entities([entity])
-        else:
-            _LOGGER.warning(
-                "Active mode %s not found in Goodwe Inverter Operation Mode Entity. Skipping entity creation",
-                active_mode,
-            )
 
-        eco_mode_power_entity_id = er.async_get(hass).async_get_entity_id(
-            Platform.NUMBER,
-            DOMAIN,
-            f"{DOMAIN}-eco_mode_power-{inverter.serial_number}",
-        )
-        if eco_mode_power_entity_id:
-            async_track_state_change_event(
-                hass,
-                eco_mode_power_entity_id,
-                entity.update_eco_mode_power,
-            )
-        eco_mode_soc_entity_id = er.async_get(hass).async_get_entity_id(
-            Platform.NUMBER,
-            DOMAIN,
-            f"{DOMAIN}-eco_mode_soc-{inverter.serial_number}",
-        )
-        if eco_mode_soc_entity_id:
-            async_track_state_change_event(
-                hass,
-                eco_mode_soc_entity_id,
-                entity.update_eco_mode_soc,
-            )
-
-    # read current EMS mode from the inverter
-    try:
-        ems_mode = await inverter.get_ems_mode()
-    except (InverterError, ValueError):
-        # Inverter model does not support EMS modes
-        _LOGGER.debug("Could not read inverter EMS mode", exc_info=True)
-    else:
-        entity = InverterEMSModeEntity(
-            device_info,
-            EMS_MODE,
-            inverter,
-            ems_mode,
-        )
-        async_add_entities([entity])
+    setting_reader.add(
+        Platform.SELECT, "operation_mode", _async_add_operation_mode_entity
+    )
+    setting_reader.add(Platform.SELECT, "ems_mode", _async_add_ems_mode_entity)
 
 
 class InverterOperationModeEntity(SelectEntity):

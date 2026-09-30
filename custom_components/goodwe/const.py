@@ -21,6 +21,14 @@ DEFAULT_NETWORK_RETRIES = 10
 DEFAULT_NETWORK_TIMEOUT = 1
 DEFAULT_MODBUS_ID = 0
 
+# Initial values of the inverter settings (number, select, switch and button
+# entities) are not read during setup, but after Home Assistant has started,
+# one request after another, to not overload weak (WiFi) dongles.
+SETTINGS_READ_DELAY = 120  # seconds after Home Assistant has started
+SETTINGS_READ_PAUSE = 2  # seconds between two setting reads
+SETTINGS_READ_RETRY_DELAY = 300  # seconds before retrying failed setting reads
+SETTINGS_READ_RETRIES = 3
+
 CONF_KEEP_ALIVE = "keep_alive"
 CONF_MODEL_FAMILY = "model_family"
 CONF_NETWORK_RETRIES = "network_retries"

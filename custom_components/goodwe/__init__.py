@@ -21,9 +21,14 @@ from .const import (
     DEFAULT_NETWORK_TIMEOUT,
     DOMAIN,
     PLATFORMS,
+    SETTINGS_READ_DELAY,
+    SETTINGS_READ_PAUSE,
+    SETTINGS_READ_RETRIES,
+    SETTINGS_READ_RETRY_DELAY,
 )
 from .coordinator import GoodweConfigEntry, GoodweRuntimeData, GoodweUpdateCoordinator
 from .services import async_setup_services, async_unload_services
+from .setting_reader import GoodweSettingReader
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: GoodweConfigEntry) -> bool:
@@ -82,6 +87,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoodweConfigEntry) -> bo
         inverter=inverter,
         coordinator=coordinator,
         device_info=device_info,
+        setting_reader=GoodweSettingReader(
+            hass,
+            entry,
+            delay=SETTINGS_READ_DELAY,
+            pause=SETTINGS_READ_PAUSE,
+            retry_delay=SETTINGS_READ_RETRY_DELAY,
+            retries=SETTINGS_READ_RETRIES,
+        ),
     )
 
     hass.data[DOMAIN][entry.entry_id] = entry.runtime_data
@@ -89,6 +102,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoodweConfigEntry) -> bo
     entry.async_on_unload(entry.add_update_listener(update_listener))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Platforms only registered their setting reads, execute them (deferred)
+    entry.runtime_data.setting_reader.async_start()
 
     await async_setup_services(hass)
 
@@ -135,6 +151,9 @@ async def async_unload_entry(
     hass: HomeAssistant, config_entry: GoodweConfigEntry
 ) -> bool:
     """Unload a config entry."""
+    # Stop reading settings before their platforms are unloaded
+    config_entry.runtime_data.setting_reader.async_stop()
+
     unload_ok = await hass.config_entries.async_unload_platforms(
         config_entry, PLATFORMS
     )

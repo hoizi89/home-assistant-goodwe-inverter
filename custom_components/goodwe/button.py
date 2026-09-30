@@ -3,11 +3,12 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 import logging
 
 from goodwe import Inverter, InverterError
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -57,25 +58,30 @@ async def async_setup_entry(
     """Set up the inverter button entities from a config entry."""
     inverter = config_entry.runtime_data.inverter
     device_info = config_entry.runtime_data.device_info
+    setting_reader = config_entry.runtime_data.setting_reader
 
-    entities = []
-
-    for description in BUTTONS:
+    async def _async_add_entity(description: GoodweButtonEntityDescription) -> None:
+        """Check the inverter supports the setting and add its entity."""
         try:
-            await inverter.read_setting(description.setting)
+            await setting_reader.async_read(inverter.read_setting, description.setting)
         except (InverterError, ValueError):
             # Inverter model does not support this feature
             _LOGGER.debug("Could not read %s value", description.setting)
         else:
-            entities.append(
-                GoodweButtonEntity(
-                    device_info,
-                    description,
-                    inverter,
-                )
+            async_add_entities(
+                [
+                    GoodweButtonEntity(
+                        device_info,
+                        description,
+                        inverter,
+                    )
+                ]
             )
 
-    async_add_entities(entities)
+    for description in BUTTONS:
+        setting_reader.add(
+            Platform.BUTTON, description.key, partial(_async_add_entity, description)
+        )
 
 
 class GoodweButtonEntity(ButtonEntity):

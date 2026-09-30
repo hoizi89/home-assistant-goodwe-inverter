@@ -1,6 +1,7 @@
 """GoodWe PV inverter switch entities."""
 
 from dataclasses import dataclass
+from functools import partial
 import logging
 from typing import Any
 
@@ -11,6 +12,7 @@ from homeassistant.components.switch import (
     SwitchEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -76,27 +78,34 @@ async def async_setup_entry(
     inverter = config_entry.runtime_data.inverter
     coordinator = config_entry.runtime_data.coordinator
     device_info = config_entry.runtime_data.device_info
+    setting_reader = config_entry.runtime_data.setting_reader
 
-    entities = []
-
-    for description in SWITCHES:
+    async def _async_add_entity(description: GoodweSwitchEntityDescription) -> None:
+        """Read the current state of the setting and add its entity."""
         try:
-            current_state = await inverter.read_setting(description.setting)
+            current_state = await setting_reader.async_read(
+                inverter.read_setting, description.setting
+            )
         except (InverterError, ValueError):
             # Inverter model does not support this feature
             _LOGGER.debug("Could not read %s value", description.setting)
         else:
-            entities.append(
-                InverterSwitchEntity(
-                    coordinator,
-                    device_info,
-                    description,
-                    inverter,
-                    current_state == 1,
-                )
+            async_add_entities(
+                [
+                    InverterSwitchEntity(
+                        coordinator,
+                        device_info,
+                        description,
+                        inverter,
+                        current_state == 1,
+                    )
+                ]
             )
 
-    async_add_entities(entities)
+    for description in SWITCHES:
+        setting_reader.add(
+            Platform.SWITCH, description.key, partial(_async_add_entity, description)
+        )
 
 
 class InverterSwitchEntity(

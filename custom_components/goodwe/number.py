@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 import logging
 
 from goodwe import Inverter, InverterError
@@ -12,7 +13,7 @@ from homeassistant.components.number import (
     NumberEntity,
     NumberEntityDescription,
 )
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfPower
+from homeassistant.const import PERCENTAGE, EntityCategory, Platform, UnitOfPower
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -207,16 +208,18 @@ async def async_setup_entry(
     """Set up the inverter select entities from a config entry."""
     inverter = config_entry.runtime_data.inverter
     device_info = config_entry.runtime_data.device_info
+    setting_reader = config_entry.runtime_data.setting_reader
 
-    entities = []
-
-    for description in filter(lambda dsc: dsc.filter(inverter), NUMBERS):
+    async def _async_add_entity(description: GoodweNumberEntityDescription) -> None:
+        """Read the current value of the setting and add its entity."""
         try:
-            current_value = description.mapper(await description.getter(inverter))
+            current_value = description.mapper(
+                await setting_reader.async_read(description.getter, inverter)
+            )
         except (InverterError, ValueError):
             # Inverter model does not support this setting
             _LOGGER.debug("Could not read inverter setting %s", description.key)
-            continue
+            return
 
         entity = InverterNumberEntity(device_info, description, inverter, current_value)
         # Set the max value of grid_export_limit and ems_power_limit (W version)
@@ -227,9 +230,12 @@ async def async_setup_entry(
             entity.native_max_value = (
                 inverter.rated_power * 2 if inverter.rated_power else 10000
             )
-        entities.append(entity)
+        async_add_entities([entity])
 
-    async_add_entities(entities)
+    for description in filter(lambda dsc: dsc.filter(inverter), NUMBERS):
+        setting_reader.add(
+            Platform.NUMBER, description.key, partial(_async_add_entity, description)
+        )
 
 
 class InverterNumberEntity(NumberEntity):

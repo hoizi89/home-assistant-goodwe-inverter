@@ -19,6 +19,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from .const import DEFAULT_SCAN_INTERVAL
+from .setting_reader import GoodweSettingReader
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class GoodweRuntimeData:
     inverter: Inverter
     coordinator: GoodweUpdateCoordinator
     device_info: DeviceInfo
+    setting_reader: GoodweSettingReader
 
 
 class GoodweUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
