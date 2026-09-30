@@ -1,5 +1,7 @@
 """The Goodwe inverter component."""
 
+import asyncio
+
 from goodwe import Inverter, InverterError, connect
 from goodwe.const import GOODWE_TCP_PORT, GOODWE_UDP_PORT
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_PROTOCOL, CONF_SCAN_INTERVAL
@@ -58,6 +60,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoodweConfigEntry) -> bo
         except InverterError:
             raise ConfigEntryNotReady from err
 
+    _serialize_inverter_requests(inverter)
+
     device_info = DeviceInfo(
         configuration_url="https://semsplus.goodwe.com/",
         identifiers={(DOMAIN, inverter.serial_number)},
@@ -89,6 +93,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoodweConfigEntry) -> bo
     await async_setup_services(hass)
 
     return True
+
+
+def _serialize_inverter_requests(inverter: Inverter) -> None:
+    """Make sure the inverter never receives more than one request at a time.
+
+    Platforms read their settings concurrently during setup, while coordinator
+    refreshes, entity updates, setters and services run independently of each
+    other. All their requests end up in Inverter._read_from_socket(), so serialize
+    them there, each request including all its retries, before it reaches the
+    (shared) protocol instance of the goodwe library.
+    """
+    lock = asyncio.Lock()
+    read_from_socket = inverter._read_from_socket  # noqa: SLF001
+
+    async def _serialized_read_from_socket(command):
+        async with lock:
+            return await read_from_socket(command)
+
+    inverter._read_from_socket = _serialized_read_from_socket  # noqa: SLF001
 
 
 async def async_check_port(
